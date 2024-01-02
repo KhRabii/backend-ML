@@ -1,0 +1,6 @@
+pandas
+openpyxl
+joblib
+scikit-learn
+numpy
+flask-cors
