@@ -7,6 +7,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_squared_error
 from joblib import dump
 from flask_cors import CORS
+from datetime import datetime
+
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)  # Enable support for credentials
@@ -33,6 +35,32 @@ def get_data():
     # Send the data
     return jsonify(chart_data)
 
+@app.route('/filter-data', methods=['POST'])
+def filter_data():
+    # Load the data
+    df = pd.read_excel('Data-building energy consumption.xlsx', decimal=',')
+
+    # Get date range from POST request
+    data = request.get_json()
+    start_date = datetime.strptime(data['startDate'], '%Y-%m-%dT%H:%M:%S.%fZ')
+    end_date = datetime.strptime(data['endDate'], '%Y-%m-%dT%H:%M:%S.%fZ')
+
+    # Ensure 'Time' column is in datetime format for filtering
+    df['Time'] = pd.to_datetime(df['Time'])
+
+    # Filter the DataFrame based on the date range
+    filtered_df = df[(df['Time'] >= start_date) & (df['Time'] <= end_date)].copy()
+
+    # Convert 'Time' back to string for JSON serialization
+    filtered_df['Time'] = filtered_df['Time'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Prepare the filtered data for response
+    chart_data = {
+        "time": filtered_df['Time'].tolist(),
+        "values": filtered_df['building 41'].tolist()
+    }
+
+    return jsonify(chart_data)
 
 # Data cleaning
 @app.route('/cleaning', methods=['GET'])
@@ -61,14 +89,40 @@ def get_cleaning():
     return jsonify(response)
 
 # Data correlation
-@app.route('/correlation', methods=['GET'])
-def get_correlation():
+@app.route('/all-correlation', methods=['GET'])
+def get_all_correlation():
     df = pd.read_csv('concatenated_data.csv')  # Load your data
 
     # Exclude non-numeric columns for correlation calculation
     numeric_df = df.select_dtypes(include=[float, int])
 
     correlation_matrix = numeric_df.corr().to_json()
+    return jsonify(correlation_matrix)
+
+@app.route('/correlation', methods=['POST'])
+def get_correlation():
+    # Load your data
+    df = pd.read_csv('concatenated_data.csv')
+
+    # Retrieve column names from POST request
+    data = request.get_json()
+    columns = data.get('columns')
+
+    if not columns:
+        return jsonify({"error": "No columns specified"}), 400
+
+    # Check if the specified columns exist in the DataFrame
+    missing_columns = [col for col in columns if col not in df.columns]
+    if missing_columns:
+        return jsonify({"error": "Columns not found in dataset: " + ", ".join(missing_columns)}), 404
+
+    # Filter the DataFrame to include only the specified columns
+    filtered_df = df[columns]
+    num_filtered_df = filtered_df.select_dtypes(include=[float, int])
+
+    # Calculate correlation matrix
+    correlation_matrix = num_filtered_df.corr().to_json()
+
     return jsonify(correlation_matrix)
 
 
