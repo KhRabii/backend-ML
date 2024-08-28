@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler  # StandardScaler for normalization
 from sklearn.metrics import r2_score, mean_squared_error
 from joblib import dump
 from flask_cors import CORS
@@ -14,7 +16,8 @@ app = Flask(__name__)
 CORS(app, supports_credentials=True)
 
 # Data directory prefix for Docker volume
-DATA_DIR = '/data/'
+#DATA_DIR = '/data/'
+DATA_DIR = ''
 
 @app.route('/')
 def hello_world():
@@ -144,6 +147,69 @@ def get_weekly_data():
     }
 
     return jsonify(response)
+
+def generate_equation(model, feature_names):
+    intercept = model.intercept_
+    coefficients = model.coef_
+
+    equation = f"y = {intercept:.3f}"
+    for coef, feature in zip(coefficients, feature_names):
+        equation += f" + ({coef:.3f} * {feature})"
+
+    return equation
+@app.route('/train-linear-regression', methods=['GET'])
+def train_linear_regression():
+    # Load your data (adjust paths and loading method as needed)
+    df = pd.read_csv(DATA_DIR + 'concatenated_data.csv', parse_dates=['Time'])
+    df.set_index('Time', inplace=True)
+
+    # Extracting the energy consumption data (you can adjust this based on your specific use case)
+    energy = np.array(df["building 41"])
+
+    # Reduce the number of features
+    knmi_updated = df.loc[:, ~df.columns.isin(["TD", "U", "DR", "FX"])]
+
+    X = knmi_updated  # No need to reshape if it's already in the correct format
+    y = energy  # Use the 'energy' array as the target
+
+    # Splitting the data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+
+    # Save the test sets to CSV files
+    X_test.to_csv(DATA_DIR + 'X_test_linear_regression.csv', index=False)
+    pd.DataFrame(y_test, columns=['y_test']).to_csv(DATA_DIR + 'y_test_linear_regression.csv', index=False)
+
+    # Normalize the training data (apply the same transformation to the test set if needed)
+    scaler = StandardScaler()
+    X_train_normalized = scaler.fit_transform(X_train)
+    X_test_normalized = scaler.transform(X_test)
+
+    # Train the linear regression model
+    model = LinearRegression()
+    model.fit(X_train_normalized, y_train)
+
+    # Predicting on the training data
+    Predicted_Train = model.predict(X_train_normalized)
+
+    # Evaluating the model
+    r2 = r2_score(y_train, Predicted_Train)
+    mse = mean_squared_error(y_train, Predicted_Train)
+
+    # Generate the equation
+    equation = generate_equation(model, X.columns)
+
+    # Save the trained model to a file
+    dump(model, DATA_DIR + 'trained_linear_regression_model.joblib')
+
+    # Save the scaler for future use (if you want to apply the same normalization on new data)
+    dump(scaler, DATA_DIR + 'scaler_linear_regression.joblib')
+
+    # Return the performance metrics and the equation
+    return jsonify({
+        "R2_Score": r2,
+        "Mean_Squared_Error": mse,
+        "equation": equation
+    })
 
 
 @app.route('/train-model', methods=['GET'])
